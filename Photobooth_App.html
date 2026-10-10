@@ -1,0 +1,847 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Photobooth Studio</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400&family=Courier+Prime:wght@400;700&display=swap');
+
+        :root {
+            --bg-dark: #0f172a;
+            --primary: #ec4899;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: var(--bg-dark);
+            color: #f8fafc;
+            margin: 0;
+            overflow-x: hidden;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* Screen Transitions */
+        .screen {
+            display: none;
+            opacity: 0;
+            min-height: 100vh;
+            width: 100%;
+            transition: opacity 0.4s ease, transform 0.4s ease;
+            transform: translateY(20px);
+        }
+
+        .screen.active {
+            display: flex;
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        /* UI Elements */
+        .glass-panel {
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 1.5rem;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+        }
+
+        .btn-select {
+            transition: all 0.2s;
+            border: 2px solid transparent;
+        }
+        .btn-select.selected {
+            background-color: rgba(236, 72, 153, 0.2);
+            border-color: var(--primary);
+            color: #fbcfe8;
+        }
+
+        .template-card {
+            border: 2px solid rgba(255,255,255,0.1);
+            transition: all 0.3s;
+            cursor: pointer;
+            position: relative;
+        }
+        .template-card:hover {
+            transform: scale(1.02);
+            border-color: rgba(255,255,255,0.4);
+        }
+        .template-card.selected {
+            border-color: var(--primary);
+            box-shadow: 0 0 20px rgba(236, 72, 153, 0.4);
+        }
+        .template-card.selected::after {
+            content: '✓';
+            position: absolute;
+            top: 0.5rem;
+            right: 0.5rem;
+            background: var(--primary);
+            color: white;
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 14px;
+            z-index: 10;
+        }
+
+        /* Camera & Capture Effects */
+        #video-container {
+            position: relative;
+            width: 100%;
+            max-width: 800px;
+            aspect-ratio: 4/3;
+            background: #000;
+            border-radius: 1rem;
+            overflow: hidden;
+            margin: 0 auto;
+            border: 4px solid #334155;
+            box-shadow: 0 25px 50px -12px rgba(0,0,0,0.5);
+        }
+
+        #video-element {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transform: scaleX(-1); /* Default mirrored for front cam */
+        }
+        #video-element.rear {
+            transform: scaleX(1); /* No mirror for rear cam */
+        }
+
+        #flash-overlay {
+            position: absolute;
+            inset: 0;
+            background: white;
+            opacity: 0;
+            pointer-events: none;
+            z-index: 50;
+        }
+        .flash-anim {
+            animation: flashEffect 0.8s ease-out forwards;
+        }
+        @keyframes flashEffect {
+            0% { opacity: 1; }
+            100% { opacity: 0; }
+        }
+
+        #countdown {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 12rem;
+            font-weight: 900;
+            color: white;
+            text-shadow: 0 10px 30px rgba(0,0,0,0.8);
+            z-index: 40;
+            display: none;
+        }
+        .pulse { animation: pulseAnim 1s ease-in-out; }
+        @keyframes pulseAnim {
+            0% { transform: translate(-50%, -50%) scale(0.5); opacity: 0; }
+            50% { transform: translate(-50%, -50%) scale(1.1); opacity: 1; }
+            100% { transform: translate(-50%, -50%) scale(1); opacity: 0; }
+        }
+
+        /* Result Canvas */
+        #result-canvas {
+            max-width: 100%;
+            height: auto;
+            max-height: 80vh;
+            border-radius: 8px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.6);
+            display: block;
+            margin: 0 auto;
+        }
+
+        /* Notification */
+        #toast {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: #ef4444;
+            color: white;
+            padding: 1rem 2rem;
+            border-radius: 0.5rem;
+            box-shadow: 0 10px 15px -3px rgba(0,0,0,0.1);
+            transform: translateX(150%);
+            transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            z-index: 9999;
+            font-weight: 600;
+        }
+        #toast.show {
+            transform: translateX(0);
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Notification Toast (replaces alert) -->
+    <div id="toast">Notification Message</div>
+
+    <!-- SCREEN 1: Start -->
+    <div id="start-screen" class="screen active flex-col items-center justify-center relative">
+        <!-- Abstract Background -->
+        <div class="absolute inset-0 z-[-1] overflow-hidden pointer-events-none">
+            <div class="absolute top-1/4 left-1/4 w-96 h-96 bg-pink-600 rounded-full mix-blend-screen filter blur-[100px] opacity-30"></div>
+            <div class="absolute bottom-1/4 right-1/4 w-96 h-96 bg-blue-600 rounded-full mix-blend-screen filter blur-[100px] opacity-30"></div>
+        </div>
+        
+        <div class="glass-panel p-8 md:p-16 text-center max-w-2xl w-full mx-4">
+            <h1 class="text-5xl md:text-7xl font-extrabold mb-6 tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-pink-400 to-indigo-400">
+                Studio Photobox
+            </h1>
+            <p class="text-lg md:text-xl text-slate-300 mb-10">Capture your best moments with custom templates.</p>
+            <button onclick="goToScreen('setup-screen')" class="px-10 py-5 bg-white text-slate-900 text-xl font-bold rounded-full hover:scale-105 transition-transform shadow-[0_0_30px_rgba(255,255,255,0.2)]">
+                Start Session ✨
+            </button>
+        </div>
+    </div>
+
+    <!-- SCREEN 2: Setup -->
+    <div id="setup-screen" class="screen flex-col p-6 md:p-12">
+        <div class="max-w-6xl w-full mx-auto">
+            <div class="flex justify-between items-center mb-8">
+                <h2 class="text-3xl md:text-4xl font-bold">Session Setup</h2>
+                <button onclick="goToScreen('start-screen')" class="text-slate-400 hover:text-white font-semibold">Cancel</button>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                <!-- Left Panel: Settings -->
+                <div class="lg:col-span-4 space-y-8 glass-panel p-6 md:p-8">
+                    <div>
+                        <h3 class="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">Camera</h3>
+                        <div class="flex gap-4">
+                            <button class="btn-select selected flex-1 py-3 bg-slate-800 rounded-xl font-bold" data-target="cam" data-val="user">Front</button>
+                            <button class="btn-select flex-1 py-3 bg-slate-800 rounded-xl font-bold" data-target="cam" data-val="environment">Rear</button>
+                        </div>
+                    </div>
+
+                    <div>
+                        <h3 class="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">Photos</h3>
+                        <div class="flex gap-4">
+                            <button class="btn-select selected flex-1 py-3 bg-slate-800 rounded-xl font-bold text-xl" data-target="count" data-val="3">3</button>
+                            <button class="btn-select flex-1 py-3 bg-slate-800 rounded-xl font-bold text-xl" data-target="count" data-val="4">4</button>
+                        </div>
+                    </div>
+
+                    <div class="pt-6">
+                        <button onclick="initCameraAndGo()" class="w-full py-4 bg-gradient-to-r from-pink-500 to-indigo-600 hover:from-pink-400 hover:to-indigo-500 text-white rounded-xl font-bold text-xl shadow-lg transform hover:-translate-y-1 transition-all">
+                            Open Camera ➔
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Right Panel: Templates -->
+                <div class="lg:col-span-8 glass-panel p-6 md:p-8">
+                    <h3 class="text-sm font-bold text-slate-400 uppercase tracking-wider mb-6">Choose Template</h3>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-2 gap-6">
+                        
+                        <!-- Preset: Newspaper -->
+                        <div class="template-card selected bg-slate-800/60 p-5 rounded-2xl text-center flex flex-col items-center" data-type="preset" data-val="newspaper">
+                            <div class="w-full h-32 bg-[#f4ecd8] rounded mb-4 p-2 border border-stone-400 flex flex-col shadow-inner">
+                                <div class="h-2 border-b border-black mb-2 text-[4px] text-black font-serif">THE DAILY NEWS</div>
+                                <div class="flex-1 bg-stone-300"></div>
+                            </div>
+                            <h4 class="font-bold text-lg text-white">Newspaper</h4>
+                            <p class="text-xs text-slate-400 mt-1">Vintage article style</p>
+                        </div>
+
+                        <!-- Preset: Vintage Film -->
+                        <div class="template-card bg-slate-800/60 p-5 rounded-2xl text-center flex flex-col items-center" data-type="preset" data-val="film">
+                            <div class="w-full h-32 bg-black rounded mb-4 p-2 border-x-4 border-dotted border-white flex flex-col shadow-inner">
+                                <div class="flex-1 bg-zinc-800 mb-1 mt-1"></div><div class="flex-1 bg-zinc-800 mb-1"></div>
+                            </div>
+                            <h4 class="font-bold text-lg text-white">Classic Film</h4>
+                            <p class="text-xs text-slate-400 mt-1">35mm analog roll</p>
+                        </div>
+
+                        <!-- Preset: Aesthetic -->
+                        <div class="template-card bg-slate-800/60 p-5 rounded-2xl text-center flex flex-col items-center" data-type="preset" data-val="aesthetic">
+                            <div class="w-full h-32 bg-white rounded mb-4 p-3 shadow-inner flex flex-col">
+                                <div class="flex-1 bg-gray-200 rounded-sm mb-2 shadow-sm"></div>
+                                <div class="h-2 bg-gray-100 rounded-full w-1/2 mx-auto"></div>
+                            </div>
+                            <h4 class="font-bold text-lg text-white">Minimalist</h4>
+                            <p class="text-xs text-slate-400 mt-1">Clean & modern</p>
+                        </div>
+
+                        <!-- Custom Upload Option -->
+                        <div class="template-card bg-slate-800/60 p-5 rounded-2xl text-center flex flex-col items-center justify-center border-dashed border-2 hover:border-pink-500" data-type="custom" data-val="custom">
+                            <input type="file" id="custom-upload" accept="image/*" class="hidden">
+                            <div id="upload-preview" class="w-full h-32 mb-4 bg-slate-700/50 rounded flex items-center justify-center overflow-hidden border border-slate-600">
+                                <svg class="w-8 h-8 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path></svg>
+                            </div>
+                            <h4 class="font-bold text-lg text-white">Custom Upload</h4>
+                            <p class="text-xs text-slate-400 mt-1">Upload your own background</p>
+                            <button onclick="document.getElementById('custom-upload').click(); event.stopPropagation();" class="mt-3 px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded text-sm text-white transition-colors">
+                                Choose File
+                            </button>
+                        </div>
+
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- SCREEN 3: Capture -->
+    <div id="capture-screen" class="screen flex-col p-6 items-center justify-center">
+        <div class="w-full max-w-4xl">
+            <div class="flex justify-between items-center mb-6">
+                <button onclick="stopCameraAndGo('setup-screen')" class="px-4 py-2 bg-slate-800 rounded-lg hover:bg-slate-700 font-semibold transition-colors">← Back</button>
+                <div class="bg-slate-900 px-6 py-2 rounded-full border border-slate-700 font-mono text-xl shadow-lg">
+                    <span class="text-pink-400">PHOTO</span> <span id="lbl-current" class="font-bold text-white">1</span> <span class="text-slate-500">/</span> <span id="lbl-total" class="text-slate-500">3</span>
+                </div>
+                <div class="w-20"></div> <!-- Spacer for centering -->
+            </div>
+
+            <div id="video-container">
+                <video id="video-element" autoplay playsinline></video>
+                <div id="flash-overlay"></div>
+                <div id="countdown"></div>
+            </div>
+
+            <div class="mt-8 flex flex-col items-center">
+                <button id="btn-capture" onclick="startCaptureSequence()" class="w-20 h-20 md:w-24 md:h-24 rounded-full border-[6px] border-slate-300 flex items-center justify-center hover:border-pink-500 transition-colors group cursor-pointer shadow-[0_0_20px_rgba(0,0,0,0.5)]">
+                    <div class="w-16 h-16 md:w-20 md:h-20 rounded-full bg-white group-hover:bg-pink-100 group-active:scale-90 transition-transform"></div>
+                </button>
+                <p id="capture-status" class="mt-6 text-slate-400 font-bold uppercase tracking-widest text-sm">Press to start</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- SCREEN 4: Result -->
+    <div id="result-screen" class="screen flex-col p-6 md:p-12">
+        <div class="max-w-6xl w-full mx-auto text-center mb-6">
+            <h2 class="text-4xl md:text-5xl font-black bg-clip-text text-transparent bg-gradient-to-r from-teal-400 to-blue-500 mb-2">All Done!</h2>
+            <p class="text-slate-400">Here is your final photo strip.</p>
+        </div>
+        
+        <div class="max-w-6xl w-full mx-auto flex flex-col lg:flex-row gap-8 items-start">
+            <!-- Canvas Preview Area -->
+            <div class="w-full lg:w-2/3 flex justify-center bg-slate-900/50 p-4 rounded-2xl border border-slate-700/50 shadow-2xl">
+                <canvas id="result-canvas"></canvas>
+            </div>
+            
+            <!-- Actions Area -->
+            <div class="w-full lg:w-1/3 flex flex-col gap-4 sticky top-12">
+                <button onclick="downloadImage()" class="w-full py-5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white rounded-xl font-bold text-xl shadow-[0_10px_20px_rgba(37,99,235,0.3)] transition-transform hover:-translate-y-1">
+                    ⬇️ Download Photo
+                </button>
+                <button onclick="goToScreen('setup-screen')" class="w-full py-4 bg-slate-800 hover:bg-slate-700 text-white rounded-xl font-semibold text-lg transition-colors shadow-lg">
+                    🔄 Retake Photos
+                </button>
+                <button onclick="goToScreen('start-screen')" class="w-full py-4 bg-transparent hover:bg-white/5 text-slate-400 hover:text-white rounded-xl font-semibold border border-slate-700 transition-colors">
+                    🏠 Home
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- State Management ---
+        const state = {
+            cam: 'user',             // 'user' (front) or 'environment' (rear)
+            count: 3,                // 3 or 4 photos
+            templateType: 'preset',  // 'preset' or 'custom'
+            presetName: 'newspaper', // 'newspaper', 'film', 'aesthetic'
+            customDataUrl: null,     // Base64 string of uploaded background
+            stream: null,            // MediaStream object
+            photos: [],              // Array of captured base64 images
+            isCapturing: false
+        };
+
+        // --- DOM Elements ---
+        const screens = document.querySelectorAll('.screen');
+        const video = document.getElementById('video-element');
+        const flash = document.getElementById('flash-overlay');
+        const countdownEl = document.getElementById('countdown');
+        const canvas = document.getElementById('result-canvas');
+        const ctx = canvas.getContext('2d');
+        const btnCapture = document.getElementById('btn-capture');
+        const statusText = document.getElementById('capture-status');
+        const toastEl = document.getElementById('toast');
+
+        // --- Utility: Custom Alert ---
+        function showToast(msg, isError = true) {
+            toastEl.innerText = msg;
+            toastEl.style.background = isError ? '#ef4444' : '#10b981'; // Red or Green
+            toastEl.classList.add('show');
+            setTimeout(() => toastEl.classList.remove('show'), 3000);
+        }
+
+        // --- Navigation ---
+        function goToScreen(screenId) {
+            screens.forEach(s => s.classList.remove('active'));
+            document.getElementById(screenId).classList.add('active');
+            
+            // Clean up camera if navigating away from capture
+            if(screenId !== 'capture-screen' && state.stream) {
+                state.stream.getTracks().forEach(track => track.stop());
+                state.stream = null;
+            }
+        }
+
+        function stopCameraAndGo(screenId) {
+            goToScreen(screenId);
+        }
+
+        // --- Setup Screen Logic ---
+        
+        // Handle Options (Cam & Count)
+        document.querySelectorAll('.btn-select').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const target = e.target.dataset.target;
+                const val = e.target.dataset.val;
+                
+                // Visual update
+                document.querySelectorAll(`.btn-select[data-target="${target}"]`).forEach(b => b.classList.remove('selected'));
+                e.target.classList.add('selected');
+                
+                // State update
+                if(target === 'count') state.count = parseInt(val);
+                if(target === 'cam') state.cam = val;
+            });
+        });
+
+        // Handle Template Selection
+        document.querySelectorAll('.template-card').forEach(card => {
+            card.addEventListener('click', (e) => {
+                // Ignore click if clicking the file input or its button directly to prevent double triggers
+                if(e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON') return;
+                
+                document.querySelectorAll('.template-card').forEach(c => c.classList.remove('selected'));
+                const targetCard = e.currentTarget;
+                targetCard.classList.add('selected');
+                
+                state.templateType = targetCard.dataset.type;
+                if (state.templateType === 'preset') {
+                    state.presetName = targetCard.dataset.val;
+                }
+                // Custom validation happens on file upload
+            });
+        });
+
+        // Handle File Upload for Custom Template
+        const fileInput = document.getElementById('custom-upload');
+        fileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                if (!file.type.startsWith('image/')) {
+                    showToast('Please upload a valid image file.');
+                    return;
+                }
+
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    state.customDataUrl = event.target.result;
+                    
+                    // Update Preview Box
+                    const previewBox = document.getElementById('upload-preview');
+                    previewBox.innerHTML = `<img src="${state.customDataUrl}" class="w-full h-full object-cover">`;
+                    
+                    // Auto-select the custom card
+                    document.querySelectorAll('.template-card').forEach(c => c.classList.remove('selected'));
+                    const customCard = document.querySelector('.template-card[data-val="custom"]');
+                    customCard.classList.add('selected');
+                    state.templateType = 'custom';
+                    
+                    showToast('Custom template uploaded successfully!', false);
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+
+        // --- STREAMING_CHUNK:Handling camera initialization... ---
+        async function initCameraAndGo() {
+            // Validate state before proceeding
+            if (state.templateType === 'custom' && !state.customDataUrl) {
+                showToast("Please select a file for your custom upload first.");
+                return;
+            }
+
+            // Prepare capture screen UI
+            state.photos = [];
+            document.getElementById('lbl-total').innerText = state.count;
+            document.getElementById('lbl-current').innerText = 1;
+            btnCapture.style.opacity = '1';
+            btnCapture.style.pointerEvents = 'auto';
+            statusText.innerText = "Press to start";
+            
+            goToScreen('capture-screen');
+
+            try {
+                // Request camera
+                state.stream = await navigator.mediaDevices.getUserMedia({
+                    video: { 
+                        facingMode: state.cam, 
+                        width: { ideal: 1280 }, 
+                        height: { ideal: 720 } 
+                    },
+                    audio: false
+                });
+                video.srcObject = state.stream;
+                
+                // Adjust mirroring via CSS class based on camera type
+                video.className = state.cam === 'user' ? '' : 'rear'; 
+            } catch (err) {
+                console.error("Camera Error:", err);
+                showToast("Cannot access camera. Please allow permissions.");
+                goToScreen('setup-screen');
+            }
+        }
+
+        // --- STREAMING_CHUNK:Implementing capture sequence and flash... ---
+        async function startCaptureSequence() {
+            if (state.isCapturing) return;
+            state.isCapturing = true;
+            
+            // Disable button
+            btnCapture.style.opacity = '0.5';
+            btnCapture.style.pointerEvents = 'none';
+
+            for (let i = 0; i < state.count; i++) {
+                document.getElementById('lbl-current').innerText = i + 1;
+                statusText.innerText = `Capturing photo ${i+1} of ${state.count}...`;
+                
+                // 3 Second Countdown
+                await playCountdown(3);
+                
+                // Snap
+                triggerFlash();
+                captureFrame();
+                
+                // Pause slightly before next countdown
+                if (i < state.count - 1) {
+                    await new Promise(r => setTimeout(r, 800)); 
+                }
+            }
+
+            state.isCapturing = false;
+            statusText.innerText = "Processing rendering...";
+            
+            // Proceed to render
+            await renderFinalImage();
+            goToScreen('result-screen');
+        }
+
+        function playCountdown(seconds) {
+            return new Promise(resolve => {
+                countdownEl.style.display = 'block';
+                let c = seconds;
+                
+                const tick = () => {
+                    countdownEl.innerText = c;
+                    // Retrigger CSS animation
+                    countdownEl.classList.remove('pulse');
+                    void countdownEl.offsetWidth; 
+                    countdownEl.classList.add('pulse');
+                    
+                    if (c > 0) {
+                        c--;
+                        setTimeout(tick, 1000);
+                    } else {
+                        countdownEl.style.display = 'none';
+                        resolve();
+                    }
+                };
+                tick();
+            });
+        }
+
+        function triggerFlash() {
+            flash.classList.remove('flash-anim');
+            void flash.offsetWidth;
+            flash.classList.add('flash-anim');
+        }
+
+        function captureFrame() {
+            const tempCanvas = document.createElement('canvas');
+            
+            // Standardize output photo size to 4:3 landscape ratio (800x600)
+            const targetRatio = 4/3;
+            const videoRatio = video.videoWidth / video.videoHeight;
+            let sx = 0, sy = 0, sWidth = video.videoWidth, sHeight = video.videoHeight;
+
+            // Crop video feed to guarantee 4:3 without stretching
+            if (videoRatio > targetRatio) {
+                sWidth = sHeight * targetRatio;
+                sx = (video.videoWidth - sWidth) / 2;
+            } else {
+                sHeight = sWidth / targetRatio;
+                sy = (video.videoHeight - sHeight) / 2;
+            }
+
+            tempCanvas.width = 800;
+            tempCanvas.height = 600;
+            const tCtx = tempCanvas.getContext('2d');
+
+            // Handle mirroring for front camera so text is readable
+            if (state.cam === 'user') {
+                tCtx.translate(tempCanvas.width, 0);
+                tCtx.scale(-1, 1);
+            }
+            
+            tCtx.drawImage(video, sx, sy, sWidth, sHeight, 0, 0, tempCanvas.width, tempCanvas.height);
+            
+            // Save as high-quality JPEG base64
+            state.photos.push(tempCanvas.toDataURL('image/jpeg', 0.95));
+        }
+
+        // --- STREAMING_CHUNK:Creating canvas rendering engine... ---
+        async function renderFinalImage() {
+            // 1. Load captured photos into Image objects
+            const loadedPhotos = await Promise.all(state.photos.map(src => {
+                return new Promise(resolve => {
+                    const img = new Image();
+                    img.onload = () => resolve(img);
+                    img.src = src;
+                });
+            }));
+
+            // Standard layout dimensions for the photos
+            const pW = 720; // Photo width on canvas
+            const pH = 540; // Photo height on canvas (4:3)
+            
+            // Base config that templates will override
+            let cfg = {
+                bg: '#ffffff',
+                padT: 100, padB: 150, padL: 60, padR: 60,
+                spacing: 40,
+                drawBg: async (cw, ch) => { ctx.fillStyle = cfg.bg; ctx.fillRect(0,0,cw,ch); },
+                drawForeground: async (cw, ch) => {},
+                drawPhotoFrame: (x, y, w, h, index) => {}
+            };
+
+            // 2. Apply chosen template logic
+            if (state.templateType === 'preset') {
+                applyPresetLogic(cfg, state.presetName, pW, pH);
+            } else {
+                // CUSTOM TEMPLATE LOGIC
+                // The uploaded image will act as the background.
+                // Photos will be drawn centered on top of it.
+                cfg.drawBg = async (cw, ch) => {
+                    // Load custom background image
+                    const bgImg = await new Promise((resolve) => {
+                        const img = new Image();
+                        img.onload = () => resolve(img);
+                        img.src = state.customDataUrl;
+                    });
+                    
+                    // Fill whole canvas with uploaded image (cover/stretch)
+                    ctx.drawImage(bgImg, 0, 0, cw, ch);
+                    
+                    // Optional: Draw a dark semi-transparent overlay to make photos pop, 
+                    // but usually users want to see their full background. 
+                    // We'll leave it as is.
+                };
+
+                // Add a simple elegant border to photos so they stand out from custom bg
+                cfg.drawPhotoFrame = (x, y, w, h) => {
+                    ctx.lineWidth = 10;
+                    ctx.strokeStyle = '#ffffff'; // White polaroid border
+                    ctx.strokeRect(x - 5, y - 5, w + 10, h + 10);
+                    
+                    // Inner thin dark border
+                    ctx.lineWidth = 1;
+                    ctx.strokeStyle = 'rgba(0,0,0,0.2)';
+                    ctx.strokeRect(x, y, w, h);
+                };
+                
+                // Allow slightly more padding for custom to show off background
+                cfg.padT = 150;
+                cfg.padB = 150;
+                cfg.padL = 100;
+                cfg.padR = 100;
+                cfg.spacing = 60;
+            }
+
+            // 3. Calculate Final Canvas Dimensions
+            const cWidth = cfg.padL + pW + cfg.padR;
+            const cHeight = cfg.padT + (pH * state.count) + (cfg.spacing * (state.count - 1)) + cfg.padB;
+            
+            canvas.width = cWidth;
+            canvas.height = cHeight;
+
+            // Clear canvas
+            ctx.clearRect(0, 0, cWidth, cHeight);
+
+            // 4. Render Pipeline
+            
+            // Step A: Draw Background
+            await cfg.drawBg(cWidth, cHeight);
+
+            // Step B: Draw Photos & Frames
+            loadedPhotos.forEach((img, i) => {
+                const x = cfg.padL;
+                const y = cfg.padT + (i * (pH + cfg.spacing));
+                
+                // Draw Image
+                ctx.drawImage(img, x, y, pW, pH);
+                
+                // Draw Frame/Effects
+                cfg.drawPhotoFrame(x, y, pW, pH, i);
+            });
+
+            // Step C: Draw Foreground text/overlays
+            await cfg.drawForeground(cWidth, cHeight);
+        }
+
+        // Configuration for predefined templates
+        function applyPresetLogic(cfg, presetName, pW, pH) {
+            if (presetName === 'newspaper') {
+                cfg.bg = '#f4ecd8'; 
+                cfg.padT = 300; 
+                cfg.padB = 120;
+                cfg.padL = 80; cfg.padR = 80;
+                cfg.spacing = 80;
+
+                cfg.drawBg = async (cw, ch) => {
+                    ctx.fillStyle = cfg.bg; ctx.fillRect(0,0,cw,ch);
+                    
+                    ctx.fillStyle = '#292524'; // Ink
+                    // Header Lines
+                    ctx.fillRect(cfg.padL, 50, pW, 8);
+                    ctx.fillRect(cfg.padL, 64, pW, 2);
+                    
+                    // Main Title
+                    ctx.font = '900 85px "Playfair Display", serif';
+                    ctx.textAlign = 'center';
+                    ctx.fillText("THE DAILY NEWS", cw/2, 160);
+                    
+                    // Sub Info
+                    ctx.fillRect(cfg.padL, 190, pW, 2);
+                    ctx.font = 'italic 22px "Playfair Display", serif';
+                    const dateStr = new Date().toLocaleDateString('en-US', { weekday:'long', year:'numeric', month:'long', day:'numeric'});
+                    ctx.fillText(`${dateStr}  •  Special Edition`, cw/2, 230);
+                    ctx.fillRect(cfg.padL, 250, pW, 5);
+                };
+
+                cfg.drawPhotoFrame = (x, y, w, h, index) => {
+                    // Photo Border
+                    ctx.lineWidth = 4;
+                    ctx.strokeStyle = '#292524';
+                    ctx.strokeRect(x, y, w, h);
+                    
+                    // Caption
+                    ctx.font = 'italic 18px "Playfair Display", serif';
+                    ctx.fillStyle = '#292524';
+                    ctx.textAlign = 'center';
+                    ctx.fillText(`Figure ${index + 1}: Captured Moment`, x + w/2, y + h + 30);
+                };
+            } 
+            else if (presetName === 'film') {
+                cfg.bg = '#09090b'; // Almost black
+                cfg.padL = 120; cfg.padR = 120;
+                cfg.padT = 80; cfg.padB = 80;
+                cfg.spacing = 60;
+
+                cfg.drawBg = async (cw, ch) => {
+                    ctx.fillStyle = cfg.bg; ctx.fillRect(0,0,cw,ch);
+                    
+                    // Film Sprockets
+                    ctx.fillStyle = '#fdfbf7';
+                    const holeW = 30, holeH = 45, sSpacing = 70;
+                    const num = Math.floor(ch / sSpacing);
+                    
+                    for(let i=1; i < num; i++) {
+                        const y = (i * sSpacing);
+                        ctx.beginPath(); ctx.roundRect(30, y, holeW, holeH, 5); ctx.fill(); 
+                        ctx.beginPath(); ctx.roundRect(cw - 30 - holeW, y, holeW, holeH, 5); ctx.fill(); 
+                    }
+
+                    // Film Text
+                    ctx.fillStyle = '#f59e0b'; // Amber
+                    ctx.font = 'bold 24px "Courier Prime", monospace';
+                    ctx.save();
+                    ctx.translate(25, ch / 2);
+                    ctx.rotate(-Math.PI / 2);
+                    ctx.fillText("KODAK PORTRA 400", 0, 0);
+                    ctx.restore();
+                };
+
+                cfg.drawForeground = async (cw, ch) => {
+                    ctx.fillStyle = '#f59e0b';
+                    ctx.font = 'bold 20px "Courier Prime", monospace';
+                    ctx.textAlign = 'center';
+                    
+                    for(let i=0; i<state.count; i++) {
+                        const y = cfg.padT + (i * (pH + cfg.spacing)) + (pH/2);
+                        ctx.save();
+                        ctx.translate(cw - 20, y);
+                        ctx.rotate(Math.PI / 2);
+                        ctx.fillText(`▶ ${20+i}A`, 0, 0);
+                        ctx.restore();
+                    }
+                };
+            }
+            else if (presetName === 'aesthetic') {
+                cfg.bg = '#f8fafc'; // Light grey/white
+                cfg.padT = 120; cfg.padB = 250;
+                cfg.padL = 80; cfg.padR = 80;
+                cfg.spacing = 40;
+
+                cfg.drawBg = async (cw, ch) => {
+                    ctx.fillStyle = cfg.bg; ctx.fillRect(0,0,cw,ch);
+                };
+
+                cfg.drawPhotoFrame = (x, y, w, h) => {
+                    // Soft shadow
+                    ctx.shadowColor = "rgba(0,0,0,0.1)";
+                    ctx.shadowBlur = 20;
+                    ctx.shadowOffsetX = 0;
+                    ctx.shadowOffsetY = 10;
+                    
+                    ctx.fillStyle = '#ffffff';
+                    // Draw polaroid style white box slightly larger than photo
+                    ctx.fillRect(x - 15, y - 15, w + 30, h + 30);
+                    
+                    // Reset shadow for actual photo drawing
+                    ctx.shadowColor = "transparent";
+                };
+
+                cfg.drawForeground = async (cw, ch) => {
+                    ctx.fillStyle = '#334155';
+                    ctx.textAlign = 'center';
+                    
+                    ctx.font = '400 32px "Inter", sans-serif';
+                    ctx.letterSpacing = "5px";
+                    ctx.fillText("S T U D I O", cw/2, ch - 120);
+                    
+                    ctx.font = '400 16px "Inter", sans-serif';
+                    ctx.letterSpacing = "normal";
+                    const d = new Date();
+                    ctx.fillText(`${d.getFullYear()} . ${String(d.getMonth()+1).padStart(2,'0')} . ${String(d.getDate()).padStart(2,'0')}`, cw/2, ch - 80);
+                };
+            }
+        }
+
+        // --- STREAMING_CHUNK:Adding download and final utility functions... ---
+        function downloadImage() {
+            try {
+                // High quality JPEG export
+                const dataURL = canvas.toDataURL('image/jpeg', 1.0);
+                const link = document.createElement('a');
+                
+                const templateName = state.templateType === 'custom' ? 'Custom' : state.presetName;
+                link.download = `Photobooth_${templateName}_${new Date().getTime()}.jpg`;
+                link.href = dataURL;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                
+                showToast("Download started!", false);
+            } catch (err) {
+                console.error("Export Error:", err);
+                showToast("Failed to download image. Tainted canvas issue?");
+            }
+        }
+    </script>
+</body>
+</html>
